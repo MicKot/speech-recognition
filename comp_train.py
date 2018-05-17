@@ -2,8 +2,9 @@ import argparse
 import os
 import tensorflow as tf
 import operations.preprocessing as preprocessing
+import operations.comp_models as models
+import operations.batch_utils as batch_utils
 import operations.mfcc as mfcc
-import operations.model as model
 
 
 def arg_parser():
@@ -28,30 +29,26 @@ def main(args):
     train_labels = preprocessing.labels_to_onehot(train_labels)
     val_labels = preprocessing.labels_to_onehot(val_labels)
 
-    train_dataset = tf.data.Dataset.from_tensor_slices((train_mfcc, train_labels)).batch(len(train_mfcc)).repeat().shuffle(buffer_size=len(train_mfcc))
-    val_dataset = tf.data.Dataset.from_tensor_slices((val_mfcc, val_labels)).batch(len(val_mfcc)).repeat().shuffle(buffer_size=len(val_mfcc))
+    train_batcher = batch_utils.Batcher(train_mfcc, train_labels)
+    val_batcher = batch_utils.Batcher(val_mfcc, val_labels)
 
+
+    lbls = tf.placeholder(tf.int32, shape=[None, train_labels.shape[1]])
+    input = tf.placeholder(tf.float32, shape=[None, 125, 20])
+    dropout_prob = tf.placeholder(tf.float32, shape=())
+
+    model_settings = {'dct_coefficient_count': 20, 'spectrogram_length': 125, 'label_count': 13, 'fingerprint_size': 20}
+    
+    lgits, _ = models.create_single_fc_model(input, model_settings, 1, dropout_prob)
+    
     sess = tf.InteractiveSession()
-
-    handle = tf.placeholder(tf.string, shape=[])
-    iterator = tf.data.Iterator.from_string_handle(handle, train_dataset.output_types, train_dataset.output_shapes)
-    mfcc_data, labels = iterator.get_next()
-
-    training_iterator = train_dataset.make_one_shot_iterator()
-    validation_iterator = val_dataset.make_one_shot_iterator()
-
-    training_handle = sess.run(training_iterator.string_handle())
-    validation_handle = sess.run(validation_iterator.string_handle())
-    keep_prob = tf.placeholder(tf.float64, shape=())
-    training = tf.placeholder(tf.bool, shape=())
-    logits = model.model(mfcc_data, 13, keep_prob, training)
     with tf.name_scope("loss"):
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=labels))
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=lgits, labels=lbls))
         tf.summary.scalar('loss', loss)
     with tf.name_scope("optimizer"):
         train = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss)
     with tf.name_scope("evaluation"):
-        correct_prediction = tf.equal(tf.argmax(logits, 1), tf.argmax(labels, 1))
+        correct_prediction = tf.equal(tf.argmax(lgits, 1), tf.argmax(lbls, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
     sess.run(tf.global_variables_initializer())
@@ -59,11 +56,13 @@ def main(args):
 
     TRAIN_STEPS = 1500
     for step in range(TRAIN_STEPS):
+        next_data, next_labels = train_batcher.next_batch(len(train_mfcc))
         _, acc, loss_ = sess.run([train, accuracy, loss],
-                                     feed_dict={handle: training_handle, keep_prob: 0.5, training: True})
+                                     feed_dict={lbls: next_labels, input: next_data, dropout_prob: 0.5})
 
+        val_data, val_labels = val_batcher.next_batch(len(val_mfcc))
         print("\rstep %d" % step, "train_acc = %f\t" % acc, "loss = %f\t" % loss_, "val_acc = %f"
-              % sess.run(accuracy, feed_dict={handle: validation_handle, keep_prob: 1, training: False}))
+              % sess.run(accuracy, feed_dict={lbls: val_labels, input: val_data, dropout_prob: 1}))
 
 
 if __name__ == '__main__':

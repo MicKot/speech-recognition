@@ -14,4 +14,4 @@ class Batcher():
     def next_batch_test(self, batch_size):
         x = self.signals[self.i:self.i + batch_size]
         self.i = (self.i + batch_size) % len(self.signals)
-        return x, y
+        return x
