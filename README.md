@@ -9,5 +9,5 @@
 1. Run utils/cutting.py providing data directory
 2. Run utils/train_test_split providing cut_data directory
 3. To train 
-..*authors network run train.py providing cut_data/train and cut_data/test
+..* authors network run train.py providing cut_data/train and cut_data/test
 ..* comparative models run comp_train.py providing cut_data/train and cut_data/test, change network type in the code for your convenience
